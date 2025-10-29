@@ -53,8 +53,11 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    barriers = _generateRandomBarriers();
-    getFood();
+    _prepareNewRound(
+      regenerateMaze: true,
+      resetScore: true,
+      useSetState: false,
+    );
   }
 
   void _loopAudio(AudioPlayer player, String asset) async {
@@ -85,6 +88,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _resumeGame() {
+    if (preGame) {
+      startGame();
+      return;
+    }
     if (!paused) {
       return;
     }
@@ -104,146 +111,106 @@ class _HomePageState extends State<HomePage> {
   String ghostLast3 = "down";
 
   void startGame() {
-    if (preGame) {
-      _loopAudio(backgroundPlayer, 'pacman_beginning.wav');
-      _stopAudio(pausePlayer);
-      _setupRandomEntities(resetScore: true);
-
-      _gameLoop?.cancel();
-      _gameLoop = Timer.periodic(const Duration(milliseconds: 10), (timer) {
-        if (!paused) {
-          backgroundPlayer.resume();
-        }
-        if (player == ghost || player == ghost2 || player == ghost3) {
-          backgroundPlayer.stop();
-          _playAudio(deathPlayer, 'pacman_death.wav');
-          setState(() {
-            player = -1;
-          });
-          showDialog(
-              barrierDismissible: false,
-              context: context,
-              builder: (BuildContext context) {
-                return AlertDialog(
-                  title: Center(child: Text("Game Over!")),
-                  content: Text("Your Score : " + (score).toString()),
-                  actions: [
-                    ElevatedButton(
-                      onPressed: () {
-                        _loopAudio(backgroundPlayer, 'pacman_beginning.wav');
-                        _stopAudio(pausePlayer);
-                        _setupRandomEntities(resetScore: true);
-                        Navigator.pop(context);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        foregroundColor: Colors.white,
-                        backgroundColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
-                      ),
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: <Color>[
-                              Color(0xFF0D47A1),
-                              Color(0xFF1976D2),
-                              Color(0xFF42A5F5),
-                            ],
-                          ),
-                        ),
-                        padding: const EdgeInsets.all(10.0),
-                        child: const Text('Restart'),
-                      ),
-                    )
-                  ],
-                );
-              });
-        }
-      });
-      _ghostTimer?.cancel();
-      _ghostTimer = Timer.periodic(const Duration(milliseconds: 190), (timer) {
-        if (!paused) {
-          moveGhost();
-          moveGhost2();
-          moveGhost3();
-        }
-      });
-      _mouthTimer?.cancel();
-      _mouthTimer = Timer.periodic(const Duration(milliseconds: 170), (timer) {
-        setState(() {
-          mouthClosed = !mouthClosed;
-        });
-        if (food.contains(player)) {
-          _playAudio(munchPlayer, 'pacman_chomp.wav');
-          setState(() {
-            food.remove(player);
-          });
-          score++;
-        }
-
-        // if (player == ghost || player == ghost2 || player == ghost3) {
-        //   setState(() {
-        //     player = -1;
-        //   });
-        //   showDialog(
-        //       context: context,
-        //       builder: (BuildContext context) {
-        //         return AlertDialog(
-        //           title: Center(child: Text("Game Over!")),
-        //           content: Text("Your Score : " + (score).toString()),
-        //           actions: [
-        //             RaisedButton(
-        //               onPressed: () {
-        //                 setState(() {
-        //                   player = numberInRow * 14 + 1;
-        //                   ghost = numberInRow * 2 - 2;
-        //                   ghost2 = numberInRow * 9 - 1;
-        //                   ghost3 = numberInRow * 11 - 2;
-        //                   preGame = false;
-        //                   mouthClosed = false;
-        //                   direction = "right";
-        //                   food.clear();
-        //                   getFood();
-        //                   score = 0;
-        //                   Navigator.pop(context);
-        //                 });
-        //               },
-        //               textColor: Colors.white,
-        //               padding: const EdgeInsets.all(0.0),
-        //               child: Container(
-        //                 decoration: const BoxDecoration(
-        //                   gradient: LinearGradient(
-        //                     colors: <Color>[
-        //                       Color(0xFF0D47A1),
-        //                       Color(0xFF1976D2),
-        //                       Color(0xFF42A5F5),
-        //                     ],
-        //                   ),
-        //                 ),
-        //                 padding: const EdgeInsets.all(10.0),
-        //                 child: const Text('Restart'),
-        //               ),
-        //             )
-        //           ],
-        //         );
-        //       });
-        // }
-        switch (direction) {
-          case "left":
-            if (!paused) moveLeft();
-            break;
-          case "right":
-            if (!paused) moveRight();
-            break;
-          case "up":
-            if (!paused) moveUp();
-            break;
-          case "down":
-            if (!paused) moveDown();
-            break;
-        }
-      });
+    if (!preGame) {
+      return;
     }
+    _loopAudio(backgroundPlayer, 'pacman_beginning.wav');
+    _stopAudio(pausePlayer);
+    setState(() {
+      preGame = false;
+      paused = false;
+    });
+
+    _gameLoop?.cancel();
+    _gameLoop = Timer.periodic(const Duration(milliseconds: 10), (timer) {
+      if (!paused) {
+        backgroundPlayer.resume();
+      }
+      if (player == ghost || player == ghost2 || player == ghost3) {
+        backgroundPlayer.stop();
+        _playAudio(deathPlayer, 'pacman_death.wav');
+        setState(() {
+          player = -1;
+        });
+        showDialog(
+            barrierDismissible: false,
+            context: context,
+            builder: (BuildContext context) {
+              return AlertDialog(
+                title: Center(child: Text("Game Over!")),
+                content: Text("Your Score : " + (score).toString()),
+                actions: [
+                  ElevatedButton(
+                    onPressed: () {
+                      _loopAudio(backgroundPlayer, 'pacman_beginning.wav');
+                      _stopAudio(pausePlayer);
+                      _prepareNewRound(
+                        regenerateMaze: true,
+                        resetScore: true,
+                      );
+                      Navigator.pop(context);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                    ),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: <Color>[
+                            Color(0xFF0D47A1),
+                            Color(0xFF1976D2),
+                            Color(0xFF42A5F5),
+                          ],
+                        ),
+                      ),
+                      padding: const EdgeInsets.all(10.0),
+                      child: const Text('Restart'),
+                    ),
+                  )
+                ],
+              );
+            });
+      }
+    });
+    _ghostTimer?.cancel();
+    _ghostTimer = Timer.periodic(const Duration(milliseconds: 190), (timer) {
+      if (!paused) {
+        moveGhost();
+        moveGhost2();
+        moveGhost3();
+      }
+    });
+    _mouthTimer?.cancel();
+    _mouthTimer = Timer.periodic(const Duration(milliseconds: 170), (timer) {
+      setState(() {
+        mouthClosed = !mouthClosed;
+      });
+      if (food.contains(player)) {
+        _playAudio(munchPlayer, 'pacman_chomp.wav');
+        setState(() {
+          food.remove(player);
+        });
+        score++;
+      }
+
+      switch (direction) {
+        case "left":
+          if (!paused) moveLeft();
+          break;
+        case "right":
+          if (!paused) moveRight();
+          break;
+        case "up":
+          if (!paused) moveUp();
+          break;
+        case "down":
+          if (!paused) moveDown();
+          break;
+      }
+    });
   }
 
   void restart() {
@@ -271,11 +238,18 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _setupRandomEntities({bool resetScore = false}) {
-    final Set<int> newBarriers = _generateRandomBarriers();
-    final List<int> positions = _generateSpawnPositions(newBarriers);
-    setState(() {
-      barriers = newBarriers;
+  void _prepareNewRound({
+    bool regenerateMaze = false,
+    bool resetScore = false,
+    bool useSetState = true,
+  }) {
+    final bool needsMaze = regenerateMaze || barriers.isEmpty;
+    final Set<int> nextBarriers =
+        needsMaze ? _generateRandomBarriers() : Set<int>.from(barriers);
+    final List<int> positions = _generateSpawnPositions(nextBarriers);
+
+    void applyState() {
+      barriers = nextBarriers;
       player = positions[0];
       ghost = positions[1];
       ghost2 = positions[2];
@@ -284,15 +258,24 @@ class _HomePageState extends State<HomePage> {
       ghostLast = "left";
       ghostLast2 = "left";
       ghostLast3 = "down";
-      paused = false;
+      paused = true;
       mouthClosed = false;
-      preGame = false;
+      preGame = true;
       if (resetScore) {
         score = 0;
       }
       getFood();
-    });
+    }
+
+    _stopGameLoops();
+
+    if (useSetState && mounted) {
+      setState(applyState);
+    } else {
+      applyState();
+    }
   }
+
 
   List<int> _generateSpawnPositions(Set<int> currentBarriers) {
     final List<int> walkable = [];
@@ -354,6 +337,15 @@ class _HomePageState extends State<HomePage> {
     final int rowB = b ~/ numberInRow;
     final int colB = b % numberInRow;
     return (rowA - rowB).abs() + (colA - colB).abs();
+  }
+
+  void _stopGameLoops() {
+    _gameLoop?.cancel();
+    _ghostTimer?.cancel();
+    _mouthTimer?.cancel();
+    _gameLoop = null;
+    _ghostTimer = null;
+    _mouthTimer = null;
   }
 
   Set<int> _generateRandomBarriers() {
