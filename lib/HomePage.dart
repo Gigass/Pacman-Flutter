@@ -19,7 +19,21 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   static const int numberInRow = 11;
+  static const int _minSpawnDistance = 4;
+  static const Map<String, int> _directionOffsets = {
+    "left": -1,
+    "right": 1,
+    "up": -numberInRow,
+    "down": numberInRow,
+  };
+  static const Map<String, String> _oppositeDirections = {
+    "left": "right",
+    "right": "left",
+    "up": "down",
+    "down": "up",
+  };
   final int numberOfSquares = numberInRow * 16;
+  final Random _random = Random();
   int player = numberInRow * 14 + 1;
   int ghost = numberInRow * 2 - 2;
   int ghost2 = numberInRow * 9 - 1;
@@ -50,6 +64,28 @@ class _HomePageState extends State<HomePage> {
 
   void _stopAudio(AudioPlayer player) {
     player.stop();
+  }
+
+  void _pauseGame() {
+    if (paused) {
+      return;
+    }
+    setState(() {
+      paused = true;
+    });
+    backgroundPlayer.pause();
+    pausePlayer.pause();
+  }
+
+  void _resumeGame() {
+    if (!paused) {
+      return;
+    }
+    setState(() {
+      paused = false;
+    });
+    pausePlayer.pause();
+    backgroundPlayer.resume();
   }
 
   List<int> barriers = [
@@ -159,8 +195,7 @@ class _HomePageState extends State<HomePage> {
     if (preGame) {
       _loopAudio(backgroundPlayer, 'pacman_beginning.wav');
       _stopAudio(pausePlayer);
-      preGame = false;
-      getFood();
+      _setupRandomEntities(resetScore: true);
 
       _gameLoop?.cancel();
       _gameLoop = Timer.periodic(const Duration(milliseconds: 10), (timer) {
@@ -185,20 +220,8 @@ class _HomePageState extends State<HomePage> {
                       onPressed: () {
                         _loopAudio(backgroundPlayer, 'pacman_beginning.wav');
                         _stopAudio(pausePlayer);
-                        setState(() {
-                          player = numberInRow * 14 + 1;
-                          ghost = numberInRow * 2 - 2;
-                          ghost2 = numberInRow * 9 - 1;
-                          ghost3 = numberInRow * 11 - 2;
-                          paused = false;
-                          preGame = false;
-                          mouthClosed = false;
-                          direction = "right";
-                          food.clear();
-                          getFood();
-                          score = 0;
-                          Navigator.pop(context);
-                        });
+                        _setupRandomEntities(resetScore: true);
+                        Navigator.pop(context);
                       },
                       style: ElevatedButton.styleFrom(
                         padding: EdgeInsets.zero,
@@ -334,6 +357,141 @@ class _HomePageState extends State<HomePage> {
       }
   }
 
+  void _setupRandomEntities({bool resetScore = false}) {
+    final positions = _generateSpawnPositions();
+    setState(() {
+      player = positions[0];
+      ghost = positions[1];
+      ghost2 = positions[2];
+      ghost3 = positions[3];
+      direction = "right";
+      ghostLast = "left";
+      ghostLast2 = "left";
+      ghostLast3 = "down";
+      paused = false;
+      mouthClosed = false;
+      preGame = false;
+      if (resetScore) {
+        score = 0;
+      }
+      food.clear();
+      getFood();
+    });
+  }
+
+  List<int> _generateSpawnPositions() {
+    final List<int> walkable = [];
+    for (int i = 0; i < numberOfSquares; i++) {
+      if (!barriers.contains(i)) {
+        walkable.add(i);
+      }
+    }
+    if (walkable.length < 4) {
+      throw StateError('Not enough walkable squares to spawn entities.');
+    }
+    final Set<int> occupied = {};
+    final int newPlayer = _drawPosition(walkable, occupied);
+    final int newGhost =
+        _drawPositionWithDistance(walkable, occupied, newPlayer);
+    final int newGhost2 =
+        _drawPositionWithDistance(walkable, occupied, newPlayer);
+    final int newGhost3 =
+        _drawPositionWithDistance(walkable, occupied, newPlayer);
+    return [newPlayer, newGhost, newGhost2, newGhost3];
+  }
+
+  int _drawPosition(List<int> pool, Set<int> occupied) {
+    final List<int> candidates =
+        pool.where((index) => !occupied.contains(index)).toList();
+    if (candidates.isEmpty) {
+      throw StateError('No available positions for entity spawn.');
+    }
+    final int choice = candidates[_random.nextInt(candidates.length)];
+    occupied.add(choice);
+    pool.remove(choice);
+    return choice;
+  }
+
+  int _drawPositionWithDistance(
+      List<int> pool, Set<int> occupied, int reference) {
+    int currentMinDistance = _minSpawnDistance;
+    while (currentMinDistance > 0) {
+      final List<int> candidates = pool.where((index) {
+        if (occupied.contains(index)) {
+          return false;
+        }
+        return _manhattanDistance(index, reference) >= currentMinDistance;
+      }).toList();
+      if (candidates.isNotEmpty) {
+        final int choice = candidates[_random.nextInt(candidates.length)];
+        occupied.add(choice);
+        pool.remove(choice);
+        return choice;
+      }
+      currentMinDistance--;
+    }
+    return _drawPosition(pool, occupied);
+  }
+
+  int _manhattanDistance(int a, int b) {
+    final int rowA = a ~/ numberInRow;
+    final int colA = a % numberInRow;
+    final int rowB = b ~/ numberInRow;
+    final int colB = b % numberInRow;
+    return (rowA - rowB).abs() + (colA - colB).abs();
+  }
+
+  _GhostDecision _chooseRandomGhostMove(int position, String lastDirection) {
+    final List<String> availableDirections =
+        _availableGhostDirections(position);
+    if (availableDirections.isEmpty) {
+      return _GhostDecision(position, lastDirection);
+    }
+
+    List<String> candidates = availableDirections
+        .where((direction) => !_isOppositeDirection(direction, lastDirection))
+        .toList();
+    if (candidates.isEmpty) {
+      candidates = availableDirections;
+    }
+
+    final String chosenDirection =
+        candidates[_random.nextInt(candidates.length)];
+    final int offset = _directionOffsets[chosenDirection]!;
+    return _GhostDecision(position + offset, chosenDirection);
+  }
+
+  List<String> _availableGhostDirections(int position) {
+    final List<String> result = [];
+    _directionOffsets.forEach((direction, offset) {
+      if (_wouldWrapRow(position, direction)) {
+        return;
+      }
+      final int next = position + offset;
+      if (next < 0 || next >= numberOfSquares) {
+        return;
+      }
+      if (!barriers.contains(next)) {
+        result.add(direction);
+      }
+    });
+    return result;
+  }
+
+  bool _isOppositeDirection(String direction, String lastDirection) {
+    return _oppositeDirections[direction] == lastDirection;
+  }
+
+  bool _wouldWrapRow(int position, String direction) {
+    if (direction == "left" && position % numberInRow == 0) {
+      return true;
+    }
+    if (direction == "right" && position % numberInRow == numberInRow - 1) {
+      return true;
+    }
+    return false;
+  }
+
   void moveLeft() {
     if (!barriers.contains(player - 1)) {
       setState(() {
@@ -367,312 +525,29 @@ class _HomePageState extends State<HomePage> {
   }
 
   void moveGhost() {
-    switch (ghostLast) {
-      case "left":
-        if (!barriers.contains(ghost - 1)) {
-          setState(() {
-            ghost--;
-          });
-        } else {
-          if (!barriers.contains(ghost + numberInRow)) {
-            setState(() {
-              ghost += numberInRow;
-              ghostLast = "down";
-            });
-          } else if (!barriers.contains(ghost + 1)) {
-            setState(() {
-              ghost++;
-              ghostLast = "right";
-            });
-          } else if (!barriers.contains(ghost - numberInRow)) {
-            setState(() {
-              ghost -= numberInRow;
-              ghostLast = "up";
-            });
-          }
-        }
-        break;
-      case "right":
-        if (!barriers.contains(ghost + 1)) {
-          setState(() {
-            ghost++;
-          });
-        } else {
-          if (!barriers.contains(ghost - numberInRow)) {
-            setState(() {
-              ghost -= numberInRow;
-              ghostLast = "up";
-            });
-          } else if (!barriers.contains(ghost + numberInRow)) {
-            setState(() {
-              ghost += numberInRow;
-              ghostLast = "down";
-            });
-          } else if (!barriers.contains(ghost - 1)) {
-            setState(() {
-              ghost--;
-              ghostLast = "left";
-            });
-          }
-        }
-        break;
-      case "up":
-        if (!barriers.contains(ghost - numberInRow)) {
-          setState(() {
-            ghost -= numberInRow;
-            ghostLast = "up";
-          });
-        } else {
-          if (!barriers.contains(ghost + 1)) {
-            setState(() {
-              ghost++;
-              ghostLast = "right";
-            });
-          } else if (!barriers.contains(ghost - 1)) {
-            setState(() {
-              ghost--;
-              ghostLast = "left";
-            });
-          } else if (!barriers.contains(ghost + numberInRow)) {
-            setState(() {
-              ghost += numberInRow;
-              ghostLast = "down";
-            });
-          }
-        }
-        break;
-      case "down":
-        if (!barriers.contains(ghost + numberInRow)) {
-          setState(() {
-            ghost += numberInRow;
-            ghostLast = "down";
-          });
-        } else {
-          if (!barriers.contains(ghost - 1)) {
-            setState(() {
-              ghost--;
-              ghostLast = "left";
-            });
-          } else if (!barriers.contains(ghost + 1)) {
-            setState(() {
-              ghost++;
-              ghostLast = "right";
-            });
-          } else if (!barriers.contains(ghost - numberInRow)) {
-            setState(() {
-              ghost -= numberInRow;
-              ghostLast = "up";
-            });
-          }
-        }
-        break;
-    }
+    setState(() {
+      final _GhostDecision decision = _chooseRandomGhostMove(ghost, ghostLast);
+      ghost = decision.position;
+      ghostLast = decision.direction;
+    });
   }
 
   void moveGhost2() {
-    switch (ghostLast2) {
-      case "left":
-        if (!barriers.contains(ghost2 - 1)) {
-          setState(() {
-            ghost2--;
-          });
-        } else {
-          if (!barriers.contains(ghost2 + numberInRow)) {
-            setState(() {
-              ghost2 += numberInRow;
-              ghostLast2 = "down";
-            });
-          } else if (!barriers.contains(ghost2 + 1)) {
-            setState(() {
-              ghost2++;
-              ghostLast2 = "right";
-            });
-          } else if (!barriers.contains(ghost2 - numberInRow)) {
-            setState(() {
-              ghost2 -= numberInRow;
-              ghostLast2 = "up";
-            });
-          }
-        }
-        break;
-      case "right":
-        if (!barriers.contains(ghost2 + 1)) {
-          setState(() {
-            ghost2++;
-          });
-        } else {
-          if (!barriers.contains(ghost2 - numberInRow)) {
-            setState(() {
-              ghost2 -= numberInRow;
-              ghostLast2 = "up";
-            });
-          } else if (!barriers.contains(ghost2 + numberInRow)) {
-            setState(() {
-              ghost2 += numberInRow;
-              ghostLast2 = "down";
-            });
-          } else if (!barriers.contains(ghost2 - 1)) {
-            setState(() {
-              ghost2--;
-              ghostLast2 = "left";
-            });
-          }
-        }
-        break;
-      case "up":
-        if (!barriers.contains(ghost2 - numberInRow)) {
-          setState(() {
-            ghost2 -= numberInRow;
-            ghostLast2 = "up";
-          });
-        } else {
-          if (!barriers.contains(ghost2 + 1)) {
-            setState(() {
-              ghost2++;
-              ghostLast2 = "right";
-            });
-          } else if (!barriers.contains(ghost2 - 1)) {
-            setState(() {
-              ghost2--;
-              ghostLast2 = "left";
-            });
-          } else if (!barriers.contains(ghost2 + numberInRow)) {
-            setState(() {
-              ghost2 += numberInRow;
-              ghostLast2 = "down";
-            });
-          }
-        }
-        break;
-      case "down":
-        if (!barriers.contains(ghost2 + numberInRow)) {
-          setState(() {
-            ghost2 += numberInRow;
-            ghostLast2 = "down";
-          });
-        } else {
-          if (!barriers.contains(ghost2 - 1)) {
-            setState(() {
-              ghost2--;
-              ghostLast2 = "left";
-            });
-          } else if (!barriers.contains(ghost2 + 1)) {
-            setState(() {
-              ghost2++;
-              ghostLast2 = "right";
-            });
-          } else if (!barriers.contains(ghost2 - numberInRow)) {
-            setState(() {
-              ghost2 -= numberInRow;
-              ghostLast2 = "up";
-            });
-          }
-        }
-        break;
-    }
+    setState(() {
+      final _GhostDecision decision =
+          _chooseRandomGhostMove(ghost2, ghostLast2);
+      ghost2 = decision.position;
+      ghostLast2 = decision.direction;
+    });
   }
 
   void moveGhost3() {
-    switch (ghostLast) {
-      case "left":
-        if (!barriers.contains(ghost3 - 1)) {
-          setState(() {
-            ghost3--;
-          });
-        } else {
-          if (!barriers.contains(ghost3 + numberInRow)) {
-            setState(() {
-              ghost3 += numberInRow;
-              ghostLast3 = "down";
-            });
-          } else if (!barriers.contains(ghost3 + 1)) {
-            setState(() {
-              ghost3++;
-              ghostLast3 = "right";
-            });
-          } else if (!barriers.contains(ghost3 - numberInRow)) {
-            setState(() {
-              ghost3 -= numberInRow;
-              ghostLast3 = "up";
-            });
-          }
-        }
-        break;
-      case "right":
-        if (!barriers.contains(ghost3 + 1)) {
-          setState(() {
-            ghost3++;
-          });
-        } else {
-          if (!barriers.contains(ghost3 - numberInRow)) {
-            setState(() {
-              ghost3 -= numberInRow;
-              ghostLast3 = "up";
-            });
-          } else if (!barriers.contains(ghost3 - 1)) {
-            setState(() {
-              ghost3--;
-              ghostLast3 = "left";
-            });
-          } else if (!barriers.contains(ghost3 + numberInRow)) {
-            setState(() {
-              ghost3 += numberInRow;
-              ghostLast3 = "down";
-            });
-          }
-        }
-        break;
-      case "up":
-        if (!barriers.contains(ghost3 - numberInRow)) {
-          setState(() {
-            ghost3 -= numberInRow;
-            ghostLast3 = "up";
-          });
-        } else {
-          if (!barriers.contains(ghost3 + 1)) {
-            setState(() {
-              ghost3++;
-              ghostLast3 = "right";
-            });
-          } else if (!barriers.contains(ghost3 - 1)) {
-            setState(() {
-              ghost3--;
-              ghostLast3 = "left";
-            });
-          } else if (!barriers.contains(ghost3 + numberInRow)) {
-            setState(() {
-              ghost3 += numberInRow;
-              ghostLast3 = "down";
-            });
-          }
-        }
-        break;
-      case "down":
-        if (!barriers.contains(ghost3 + numberInRow)) {
-          setState(() {
-            ghost3 += numberInRow;
-            ghostLast3 = "down";
-          });
-        } else {
-          if (!barriers.contains(ghost3 - 1)) {
-            setState(() {
-              ghost3--;
-              ghostLast3 = "left";
-            });
-          } else if (!barriers.contains(ghost3 + 1)) {
-            setState(() {
-              ghost3++;
-              ghostLast3 = "right";
-            });
-          } else if (!barriers.contains(ghost3 - numberInRow)) {
-            setState(() {
-              ghost3 -= numberInRow;
-              ghostLast3 = "up";
-            });
-          }
-        }
-        break;
-    }
+    setState(() {
+      final _GhostDecision decision =
+          _chooseRandomGhostMove(ghost3, ghostLast3);
+      ghost3 = decision.position;
+      ghostLast3 = decision.direction;
+    });
   }
 
   @override
@@ -798,23 +673,7 @@ class _HomePageState extends State<HomePage> {
                         Icons.pause,
                         color: Colors.white,
                       ),
-                      onTap: () => {
-                        if (!paused)
-                          {
-                            paused = true,
-                            backgroundPlayer.pause(),
-                            _loopAudio(pausePlayer, 'pacman_intermission.wav'),
-                          }
-                        else
-                          {
-                            paused = false,
-                            _stopAudio(pausePlayer),
-                          },
-                        Icon(
-                          Icons.play_arrow,
-                          color: Colors.white,
-                        )
-                      },
+                      onTap: _pauseGame,
                     ),
                   if (paused)
                     GestureDetector(
@@ -822,20 +681,7 @@ class _HomePageState extends State<HomePage> {
                         Icons.play_arrow,
                         color: Colors.white,
                       ),
-                      onTap: () => {
-                        if (paused)
-                          {
-                            paused = false,
-                            _stopAudio(pausePlayer),
-                            backgroundPlayer.resume()
-                          }
-                        else
-                          {
-                            paused = true,
-                            backgroundPlayer.pause(),
-                            _loopAudio(pausePlayer, 'pacman_intermission.wav'),
-                          },
-                      },
+                      onTap: _resumeGame,
                     ),
                 ],
               ),
@@ -845,4 +691,11 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+}
+
+class _GhostDecision {
+  final int position;
+  final String direction;
+
+  const _GhostDecision(this.position, this.direction);
 }
