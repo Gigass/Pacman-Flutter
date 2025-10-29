@@ -50,6 +50,13 @@ class _HomePageState extends State<HomePage> {
   final AudioPlayer munchPlayer = AudioPlayer();
   final AudioPlayer deathPlayer = AudioPlayer();
 
+  @override
+  void initState() {
+    super.initState();
+    barriers = _generateRandomBarriers();
+    getFood();
+  }
+
   void _loopAudio(AudioPlayer player, String asset) async {
     await player.stop();
     await player.setReleaseMode(ReleaseMode.loop);
@@ -88,102 +95,7 @@ class _HomePageState extends State<HomePage> {
     backgroundPlayer.resume();
   }
 
-  List<int> barriers = [
-    0,
-    1,
-    2,
-    3,
-    4,
-    5,
-    6,
-    7,
-    8,
-    9,
-    10,
-    11,
-    22,
-    33,
-    44,
-    55,
-    66,
-    77,
-    99,
-    110,
-    121,
-    132,
-    143,
-    154,
-    165,
-    166,
-    167,
-    168,
-    169,
-    170,
-    171,
-    172,
-    173,
-    174,
-    175,
-    164,
-    153,
-    142,
-    131,
-    120,
-    109,
-    87,
-    76,
-    65,
-    54,
-    43,
-    32,
-    21,
-    78,
-    79,
-    80,
-    100,
-    101,
-    102,
-    84,
-    85,
-    86,
-    106,
-    107,
-    108,
-    24,
-    35,
-    46,
-    57,
-    30,
-    41,
-    52,
-    63,
-    81,
-    70,
-    59,
-    61,
-    72,
-    83,
-    26,
-    28,
-    37,
-    38,
-    39,
-    123,
-    134,
-    145,
-    129,
-    140,
-    151,
-    103,
-    114,
-    125,
-    105,
-    116,
-    127,
-    147,
-    148,
-    149,
-  ];
+  Set<int> barriers = <int>{};
 
   List<int> food = [];
   String direction = "right";
@@ -351,15 +263,19 @@ class _HomePageState extends State<HomePage> {
   }
 
   void getFood() {
-    for (int i = 0; i < numberOfSquares; i++)
+    food.clear();
+    for (int i = 0; i < numberOfSquares; i++) {
       if (!barriers.contains(i)) {
         food.add(i);
       }
+    }
   }
 
   void _setupRandomEntities({bool resetScore = false}) {
-    final positions = _generateSpawnPositions();
+    final Set<int> newBarriers = _generateRandomBarriers();
+    final List<int> positions = _generateSpawnPositions(newBarriers);
     setState(() {
+      barriers = newBarriers;
       player = positions[0];
       ghost = positions[1];
       ghost2 = positions[2];
@@ -374,15 +290,14 @@ class _HomePageState extends State<HomePage> {
       if (resetScore) {
         score = 0;
       }
-      food.clear();
       getFood();
     });
   }
 
-  List<int> _generateSpawnPositions() {
+  List<int> _generateSpawnPositions(Set<int> currentBarriers) {
     final List<int> walkable = [];
     for (int i = 0; i < numberOfSquares; i++) {
-      if (!barriers.contains(i)) {
+      if (!currentBarriers.contains(i)) {
         walkable.add(i);
       }
     }
@@ -439,6 +354,95 @@ class _HomePageState extends State<HomePage> {
     final int rowB = b ~/ numberInRow;
     final int colB = b % numberInRow;
     return (rowA - rowB).abs() + (colA - colB).abs();
+  }
+
+  Set<int> _generateRandomBarriers() {
+    final Set<int> barrierSet = <int>{};
+    final int rows = numberOfSquares ~/ numberInRow;
+
+    for (int row = 0; row < rows; row++) {
+      for (int col = 0; col < numberInRow; col++) {
+        final int index = row * numberInRow + col;
+        if (row == 0 ||
+            row == rows - 1 ||
+            col == 0 ||
+            col == numberInRow - 1) {
+          barrierSet.add(index);
+        }
+      }
+    }
+
+    final List<int> interior = [];
+    for (int row = 1; row < rows - 1; row++) {
+      for (int col = 1; col < numberInRow - 1; col++) {
+        interior.add(row * numberInRow + col);
+      }
+    }
+    interior.shuffle(_random);
+
+    final int boundaryCount = barrierSet.length;
+    final double density = 0.22 + _random.nextDouble() * 0.1;
+    final int targetInteriorWalls =
+        min(interior.length, (interior.length * density).round());
+
+    for (final int candidate in interior) {
+      if ((barrierSet.length - boundaryCount) >= targetInteriorWalls) {
+        break;
+      }
+      barrierSet.add(candidate);
+      if (!_isWalkableConnected(barrierSet)) {
+        barrierSet.remove(candidate);
+      }
+    }
+
+    if ((numberOfSquares - barrierSet.length) < 8) {
+      return _generateRandomBarriers();
+    }
+
+    return barrierSet;
+  }
+
+  bool _isWalkableConnected(Set<int> barrierSet) {
+    final int totalWalkable = numberOfSquares - barrierSet.length;
+    if (totalWalkable <= 0) {
+      return false;
+    }
+
+    int? start;
+    for (int i = 0; i < numberOfSquares; i++) {
+      if (!barrierSet.contains(i)) {
+        start = i;
+        break;
+      }
+    }
+    if (start == null) {
+      return false;
+    }
+
+    final Set<int> visited = <int>{start};
+    final List<int> queue = [start];
+
+    while (queue.isNotEmpty) {
+      final int current = queue.removeAt(0);
+      for (final MapEntry<String, int> entry in _directionOffsets.entries) {
+        final String direction = entry.key;
+        final int offset = entry.value;
+        if (_wouldWrapRow(current, direction)) {
+          continue;
+        }
+        final int next = current + offset;
+        if (next < 0 || next >= numberOfSquares) {
+          continue;
+        }
+        if (barrierSet.contains(next) || visited.contains(next)) {
+          continue;
+        }
+        visited.add(next);
+        queue.add(next);
+      }
+    }
+
+    return visited.length == totalWalkable;
   }
 
   _GhostDecision _chooseRandomGhostMove(int position, String lastDirection) {
